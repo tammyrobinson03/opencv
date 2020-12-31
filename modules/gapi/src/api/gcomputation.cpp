@@ -9,11 +9,12 @@
 #include <algorithm> // remove_if
 #include <cctype>    // isspace (non-locale version)
 #include <ade/util/algorithm.hpp>
+#include <ade/util/zip_range.hpp>   // util::indexed
 
 #include "logger.hpp" // GAPI_LOG
 
-#include "opencv2/gapi/gcomputation.hpp"
-#include "opencv2/gapi/gkernel.hpp"
+#include <opencv2/gapi/gcomputation.hpp>
+#include <opencv2/gapi/gkernel.hpp>
 
 #include "api/gcomputation_priv.hpp"
 #include "api/gcall_priv.hpp"
@@ -21,6 +22,7 @@
 
 #include "compiler/gmodelbuilder.hpp"
 #include "compiler/gcompiler.hpp"
+#include "compiler/gcompiled_priv.hpp"
 
 // cv::GComputation private implementation /////////////////////////////////////
 // <none>
@@ -56,18 +58,37 @@ cv::GComputation::GComputation(const std::vector<GMat> &ins,
                                const std::vector<GMat> &outs)
     : m_priv(new Priv())
 {
+    Priv::Expr e;
     const auto wrap = [](cv::GMat m) { return GProtoArg(m); };
-    ade::util::transform(ins,  std::back_inserter(m_priv->m_ins),  wrap);
-    ade::util::transform(outs, std::back_inserter(m_priv->m_outs), wrap);
+    ade::util::transform(ins,  std::back_inserter(e.m_ins),  wrap);
+    ade::util::transform(outs, std::back_inserter(e.m_outs), wrap);
+    m_priv->m_shape = std::move(e);
 }
 
 cv::GComputation::GComputation(cv::GProtoInputArgs &&ins,
                                cv::GProtoOutputArgs &&outs)
     : m_priv(new Priv())
 {
-    m_priv->m_ins  = std::move(ins.m_args);
-    m_priv->m_outs = std::move(outs.m_args);
+    m_priv->m_shape = Priv::Expr{
+          std::move(ins.m_args)
+        , std::move(outs.m_args)
+    };
 }
+
+cv::GComputation::GComputation(cv::gapi::s11n::IIStream &is)
+    : m_priv(new Priv())
+{
+    m_priv->m_shape = gapi::s11n::deserialize(is);
+}
+
+void cv::GComputation::serialize(cv::gapi::s11n::IOStream &os) const
+{
+    // Build a basic GModel and write the whole thing to the stream
+    auto pG = cv::gimpl::GCompiler::makeGraph(*m_priv);
+    std::vector<ade::NodeHandle> nhs(pG->nodes().begin(), pG->nodes().end());
+    gapi::s11n::serialize(os, *pG, nhs);
+}
+
 
 cv::GCompiled cv::GComputation::compile(GMetaArgs &&metas, GCompileArgs &&args)
 {
@@ -76,31 +97,127 @@ cv::GCompiled cv::GComputation::compile(GMetaArgs &&metas, GCompileArgs &&args)
     return comp.compile();
 }
 
-void cv::GComputation::apply(GRunArgs &&ins, GRunArgsP &&outs, GCompileArgs &&args)
+cv::GStreamingCompiled cv::GComputation::compileStreaming(GMetaArgs &&metas, GCompileArgs &&args)
 {
-    const auto in_metas = descr_of(ins);
+    cv::gimpl::GCompiler comp(*this, std::move(metas), std::move(args));
+    return comp.compileStreaming();
+}
+
+cv::GStreamingCompiled cv::GComputation::compileStreaming(GCompileArgs &&args)
+{
+    cv::gimpl::GCompiler comp(*this, {}, std::move(args));
+    return comp.compileStreaming();
+}
+
+// FIXME: Introduce similar query/test method for GMetaArgs as a building block
+// for functions like this?
+static bool formats_are_same(const cv::GMetaArgs& metas1, const cv::GMetaArgs& metas2)
+{
+    return std::equal(metas1.cbegin(), metas1.cend(), metas2.cbegin(),
+                      [](const cv::GMetaArg& meta1, const cv::GMetaArg& meta2) {
+                          if (meta1.index() == meta2.index() && meta1.index() == cv::GMetaArg::index_of<cv::GMatDesc>())
+                          {
+                              const auto& desc1 = cv::util::get<cv::GMatDesc>(meta1);
+                              const auto& desc2 = cv::util::get<cv::GMatDesc>(meta2);
+
+                              // comparison by size is omitted
+                              return (desc1.chan  == desc2.chan &&
+                                      desc1.depth == desc2.depth);
+                          }
+                          else
+                          {
+                              return meta1 == meta2;
+                          }
+                     });
+}
+
+void cv::GComputation::recompile(GMetaArgs&& in_metas, GCompileArgs &&args)
+{
     // FIXME Graph should be recompiled when GCompileArgs have changed
     if (m_priv->m_lastMetas != in_metas)
     {
-        // FIXME: Had to construct temporary object as compile() takes && (r-value)
-        m_priv->m_lastCompiled = compile(GMetaArgs(in_metas), std::move(args));
-        m_priv->m_lastMetas    = in_metas; // Update only here, if compile() was ok
+        if (m_priv->m_lastCompiled &&
+                m_priv->m_lastCompiled.canReshape() &&
+                formats_are_same(m_priv->m_lastMetas, in_metas))
+        {
+            m_priv->m_lastCompiled.reshape(in_metas, args);
+        }
+        else
+        {
+            // FIXME: Had to construct temporary object as compile() takes && (r-value)
+            m_priv->m_lastCompiled = compile(GMetaArgs(in_metas), std::move(args));
+        }
+        m_priv->m_lastMetas = in_metas;
     }
+}
+
+void cv::GComputation::apply(GRunArgs &&ins, GRunArgsP &&outs, GCompileArgs &&args)
+{
+    recompile(descr_of(ins), std::move(args));
     m_priv->m_lastCompiled(std::move(ins), std::move(outs));
 }
 
-void cv::GComputation::apply(const std::vector<cv::gapi::own::Mat> &ins,
-                             const std::vector<cv::gapi::own::Mat> &outs,
+void cv::GComputation::apply(const std::vector<cv::Mat> &ins,
+                             const std::vector<cv::Mat> &outs,
                              GCompileArgs &&args)
 {
     GRunArgs call_ins;
     GRunArgsP call_outs;
 
     auto tmp = outs;
-    for (const cv::gapi::own::Mat &m : ins) { call_ins.emplace_back(m);   }
-    for (      cv::gapi::own::Mat &m : tmp) { call_outs.emplace_back(&m); }
+    for (const cv::Mat &m : ins) { call_ins.emplace_back(m);   }
+    for (      cv::Mat &m : tmp) { call_outs.emplace_back(&m); }
 
     apply(std::move(call_ins), std::move(call_outs), std::move(args));
+}
+
+// NB: This overload is called from python code
+cv::GRunArgs cv::GComputation::apply(GRunArgs &&ins, GCompileArgs &&args)
+{
+    recompile(descr_of(ins), std::move(args));
+
+    const auto& out_info = m_priv->m_lastCompiled.priv().outInfo();
+
+    GRunArgs run_args;
+    GRunArgsP outs;
+    run_args.reserve(out_info.size());
+    outs.reserve(out_info.size());
+
+    for (auto&& info : out_info)
+    {
+        switch (info.shape)
+        {
+            case cv::GShape::GMAT:
+            {
+                run_args.emplace_back(cv::Mat{});
+                outs.emplace_back(&cv::util::get<cv::Mat>(run_args.back()));
+                break;
+            }
+            case cv::GShape::GSCALAR:
+            {
+                run_args.emplace_back(cv::Scalar{});
+                outs.emplace_back(&cv::util::get<cv::Scalar>(run_args.back()));
+                break;
+            }
+            case cv::GShape::GARRAY:
+            {
+                switch (info.kind)
+                {
+                    case cv::detail::OpaqueKind::CV_POINT2F:
+                        run_args.emplace_back(cv::detail::VectorRef{std::vector<cv::Point2f>{}});
+                        outs.emplace_back(cv::util::get<cv::detail::VectorRef>(run_args.back()));
+                        break;
+                    default:
+                        util::throw_error(std::logic_error("Unsupported kind for GArray"));
+                }
+                break;
+            }
+            default:
+                util::throw_error(std::logic_error("Only cv::GMat and cv::GScalar are supported for python output"));
+        }
+    }
+    m_priv->m_lastCompiled(std::move(ins), std::move(outs));
+    return run_args;
 }
 
 #if !defined(GAPI_STANDALONE)
@@ -128,16 +245,14 @@ void cv::GComputation::apply(cv::Mat in1, cv::Mat in2, cv::Scalar &out, GCompile
 }
 
 void cv::GComputation::apply(const std::vector<cv::Mat> &ins,
-                             const std::vector<cv::Mat> &outs,
+                                   std::vector<cv::Mat> &outs,
                              GCompileArgs &&args)
 {
     GRunArgs call_ins;
     GRunArgsP call_outs;
 
-    // Make a temporary copy of vector outs - cv::Mats are copies anyway
-    auto tmp = outs;
-    for (const cv::Mat &m : ins) { call_ins.emplace_back(m);   }
-    for (      cv::Mat &m : tmp) { call_outs.emplace_back(&m); }
+    for (const cv::Mat &m : ins)  { call_ins.emplace_back(m);   }
+    for (      cv::Mat &m : outs) { call_outs.emplace_back(&m); }
 
     apply(std::move(call_ins), std::move(call_outs), std::move(args));
 }

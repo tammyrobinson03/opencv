@@ -47,10 +47,10 @@ const char* liveCaptureHelp =
         "  'g' - start capturing images\n"
         "  'u' - switch undistortion on/off\n";
 
-static void help()
+static void help(char** argv)
 {
     printf( "This is a camera calibration sample.\n"
-        "Usage: calibration\n"
+        "Usage: %s\n"
         "     -w=<board_width>         # the number of inner corners per one of board dimension\n"
         "     -h=<board_height>        # the number of inner corners per another board dimension\n"
         "     [-pt=<pattern>]          # the type of pattern: chessboard or circles' grid\n"
@@ -81,7 +81,7 @@ static void help()
         "                              #    the text file can be generated with imagelist_creator\n"
         "                              #  - name of video file with a video of the board\n"
         "                              # if input_data not specified, a live view from the camera is used\n"
-        "\n" );
+        "\n", argv[0] );
     printf("\n%s",usage);
     printf( "\n%s", liveCaptureHelp );
 }
@@ -285,12 +285,31 @@ static bool readStringList( const string& filename, vector<string>& l )
     FileStorage fs(filename, FileStorage::READ);
     if( !fs.isOpened() )
         return false;
+    size_t dir_pos = filename.rfind('/');
+    if (dir_pos == string::npos)
+        dir_pos = filename.rfind('\\');
     FileNode n = fs.getFirstTopLevelNode();
     if( n.type() != FileNode::SEQ )
         return false;
     FileNodeIterator it = n.begin(), it_end = n.end();
     for( ; it != it_end; ++it )
-        l.push_back((string)*it);
+    {
+        string fname = (string)*it;
+        if (dir_pos != string::npos)
+        {
+            string fpath = samples::findFile(filename.substr(0, dir_pos + 1) + fname, false);
+            if (fpath.empty())
+            {
+                fpath = samples::findFile(fname);
+            }
+            fname = fpath;
+        }
+        else
+        {
+            fname = samples::findFile(fname);
+        }
+        l.push_back(fname);
+    }
     return true;
 }
 
@@ -359,7 +378,7 @@ int main( int argc, char** argv )
         "{@input_data|0|}");
     if (parser.has("help"))
     {
-        help();
+        help(argv);
         return 0;
     }
     boardSize.width = parser.get<int>( "w" );
@@ -408,7 +427,7 @@ int main( int argc, char** argv )
     }
     if (!parser.check())
     {
-        help();
+        help(argv);
         parser.printErrors();
         return -1;
     }
@@ -427,10 +446,10 @@ int main( int argc, char** argv )
 
     if( !inputFilename.empty() )
     {
-        if( !videofile && readStringList(inputFilename, imageList) )
+        if( !videofile && readStringList(samples::findFile(inputFilename), imageList) )
             mode = CAPTURING;
         else
-            capture.open(inputFilename);
+            capture.open(samples::findFileOrKeep(inputFilename));
     }
     else
         capture.open(cameraId);

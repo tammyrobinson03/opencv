@@ -121,25 +121,10 @@ static void findSquares( const Mat& image, vector<vector<Point> >& squares )
     }
 }
 
-
-// the function draws all the squares in the image
-static void drawSquares( Mat& image, const vector<vector<Point> >& squares )
-{
-    for( size_t i = 0; i < squares.size(); i++ )
-    {
-        const Point* p = &squares[i][0];
-        int n = (int)squares[i].size();
-        polylines(image, &p, &n, 1, true, Scalar(0,255,0), 3, LINE_AA);
-    }
-
-    imshow(wndname, image);
-}
-
-
 int main(int argc, char** argv)
 {
-    static const char* names[] = { "../data/pic1.png", "../data/pic2.png", "../data/pic3.png",
-        "../data/pic4.png", "../data/pic5.png", "../data/pic6.png", 0 };
+    static const char* names[] = { "pic1.png", "pic2.png", "pic3.png",
+        "pic4.png", "pic5.png", "pic6.png", 0 };
     help(argv[0]);
 
     if( argc > 1)
@@ -148,19 +133,21 @@ int main(int argc, char** argv)
      names[1] =  "0";
     }
 
-    vector<vector<Point> > squares;
-
     for( int i = 0; names[i] != 0; i++ )
     {
-        Mat image = imread(names[i], IMREAD_COLOR);
+        string filename = samples::findFile(names[i]);
+        Mat image = imread(filename, IMREAD_COLOR);
         if( image.empty() )
         {
-            cout << "Couldn't load " << names[i] << endl;
+            cout << "Couldn't load " << filename << endl;
             continue;
         }
 
+        vector<vector<Point> > squares;
         findSquares(image, squares);
-        drawSquares(image, squares);
+
+        polylines(image, squares, true, Scalar(0, 255, 0), 3, LINE_AA);
+        imshow(wndname, image);
 
         int c = waitKey();
         if( c == 27 )

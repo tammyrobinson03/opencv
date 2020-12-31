@@ -47,7 +47,7 @@
 
 #include "precomp.hpp"
 #include "opencv2/imgproc/imgproc_c.h"
-#include "opencv2/photo/photo_c.h"
+#include "opencv2/photo/legacy/constants_c.h"
 
 #undef CV_MAT_ELEM_PTR_FAST
 #define CV_MAT_ELEM_PTR_FAST( mat, row, col, pix_size )  \
@@ -299,7 +299,7 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -411,7 +411,7 @@ icvTeleaInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQu
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -531,7 +531,7 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -619,7 +619,7 @@ icvNSInpaintFMM(const CvMat *f, CvMat *t, CvMat *out, int range, CvPriorityQueue
             else if(q==1) {i=ii;   j=jj-1;}
             else if(q==2) {i=ii+1; j=jj;}
             else if(q==3) {i=ii;   j=jj+1;}
-            if ((i<=1)||(j<=1)||(i>t->rows-1)||(j>t->cols-1)) continue;
+            if ((i<=0)||(j<=0)||(i>t->rows-1)||(j>t->cols-1)) continue;
 
             if (CV_MAT_ELEM(*f,uchar,i,j)==INSIDE) {
                dist = min4(FastMarching_solve(i-1,j,i,j-1,f,t),
@@ -727,8 +727,8 @@ namespace cv {
 template<> struct DefaultDeleter<IplConvKernel>{ void operator ()(IplConvKernel* obj) const { cvReleaseStructuringElement(&obj); } };
 }
 
-void
-cvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_img,
+static void
+icvInpaint( const CvArr* _input_img, const CvArr* _inpaint_mask, CvArr* _output_img,
            double inpaintRange, int flags )
 {
     cv::Ptr<CvMat> mask, band, f, t, out;
@@ -847,5 +847,5 @@ void cv::inpaint( InputArray _src, InputArray _mask, OutputArray _dst,
     _dst.create( src.size(), src.type() );
     Mat dst = _dst.getMat();
     CvMat c_src = cvMat(src), c_mask = cvMat(mask), c_dst = cvMat(dst);
-    cvInpaint( &c_src, &c_mask, &c_dst, inpaintRange, flags );
+    icvInpaint( &c_src, &c_mask, &c_dst, inpaintRange, flags );
 }

@@ -41,6 +41,7 @@
 //
 //M*/
 #include "precomp.hpp"
+#include "opencv2/imgproc.hpp"
 
 #import <TargetConditionals.h>
 
@@ -111,11 +112,14 @@ static bool wasInitialized = false;
     BOOL autosize;
     BOOL firstContent;
     int status;
+    int x0, y0;
 }
 @property(assign) CvMouseCallback mouseCallback;
 @property(assign) void *mouseParam;
 @property(assign) BOOL autosize;
 @property(assign) BOOL firstContent;
+@property(assign) int x0;
+@property(assign) int y0;
 @property(retain) NSMutableDictionary *sliders;
 @property(readwrite) int status;
 - (CVView *)contentView;
@@ -230,7 +234,7 @@ CV_IMPL void cvShowImage( const char* name, const CvArr* arr)
             if (oldImageSize.height != imageSize.height || oldImageSize.width != imageSize.width)
             {
                 //Set new view size considering sliders (reserve height and min width)
-                NSSize scaledImageSize;
+                NSSize scaledImageSize = imageSize;
                 if ([[window contentView] respondsToSelector:@selector(convertSizeFromBacking:)])
                 {
                     // Only resize for retina displays if the image is bigger than the screen
@@ -239,17 +243,28 @@ CV_IMPL void cvShowImage( const char* name, const CvArr* arr)
                     screenSize.height -= titleBarHeight;
                     if (imageSize.width > screenSize.width || imageSize.height > screenSize.height)
                     {
+                        CGFloat fx = screenSize.width/std::max(imageSize.width, (CGFloat)1.f);
+                        CGFloat fy = screenSize.height/std::max(imageSize.height, (CGFloat)1.f);
+                        CGFloat min_f = std::min(fx, fy);
                         scaledImageSize = [[window contentView] convertSizeFromBacking:imageSize];
+                        scaledImageSize.width = std::min(scaledImageSize.width, min_f*imageSize.width);
+                        scaledImageSize.height = std::min(scaledImageSize.height, min_f*imageSize.height);
                     }
-                }
-                else
-                {
-                    scaledImageSize = imageSize;
                 }
                 NSSize contentSize = vrectOld.size;
                 contentSize.height = scaledImageSize.height + [window contentView].sliderHeight;
                 contentSize.width = std::max<int>(scaledImageSize.width, MIN_SLIDER_WIDTH);
                 [window setContentSize:contentSize]; //adjust sliders to fit new window size
+                if([window firstContent])
+                {
+                    int x = [window x0];
+                    int y = [window y0];
+                    if(x >= 0 && y >= 0)
+                    {
+                        y = [[window screen] visibleFrame].size.height - y;
+                        [window setFrameTopLeftPoint:NSMakePoint(x, y)];
+                    }
+                }
             }
         }
         [window setFirstContent:NO];
@@ -265,7 +280,7 @@ CV_IMPL void cvResizeWindow( const char* name, int width, int height)
     CVWindow *window = cvGetWindow(name);
     if(window && ![window autosize]) {
         height += [window contentView].sliderHeight;
-        NSSize size = { width, height };
+        NSSize size = { (CGFloat)width, (CGFloat)height };
         [window setContentSize:size];
     }
     [localpool drain];
@@ -273,7 +288,6 @@ CV_IMPL void cvResizeWindow( const char* name, int width, int height)
 
 CV_IMPL void cvMoveWindow( const char* name, int x, int y)
 {
-
     CV_FUNCNAME("cvMoveWindow");
     __BEGIN__;
 
@@ -285,8 +299,14 @@ CV_IMPL void cvMoveWindow( const char* name, int x, int y)
     //cout << "cvMoveWindow"<< endl;
     window = cvGetWindow(name);
     if(window) {
-        y = [[window screen] frame].size.height - y;
-        [window setFrameTopLeftPoint:NSMakePoint(x, y)];
+        if([window firstContent]) {
+            [window setX0:x];
+            [window setY0:y];
+        }
+        else {
+            y = [[window screen] visibleFrame].size.height - y;
+            [window setFrameTopLeftPoint:NSMakePoint(x, y)];
+        }
     }
     [localpool1 drain];
 
@@ -555,6 +575,8 @@ CV_IMPL int cvNamedWindow( const char* name, int flags )
     [window setFrameTopLeftPoint:initContentRect.origin];
 
     [window setFirstContent:YES];
+    [window setX0:-1];
+    [window setY0:-1];
 
     [window setContentView:[[CVView alloc] init]];
 
@@ -711,6 +733,68 @@ void cvSetModeWindow_COCOA( const char* name, double prop_value )
     __END__;
 }
 
+double cvGetPropTopmost_COCOA(const char* name)
+{
+    double    result = -1;
+    CVWindow* window = nil;
+
+    CV_FUNCNAME("cvGetPropTopmost_COCOA");
+
+    __BEGIN__;
+    if (name == NULL)
+    {
+        CV_ERROR(CV_StsNullPtr, "NULL name string");
+    }
+
+    window = cvGetWindow(name);
+    if (window == NULL)
+    {
+        CV_ERROR(CV_StsNullPtr, "NULL window");
+    }
+
+    result = (window.level == NSStatusWindowLevel) ? 1 : 0;
+
+    __END__;
+    return result;
+}
+
+void cvSetPropTopmost_COCOA( const char* name, const bool topmost )
+{
+    CVWindow *window = nil;
+    NSAutoreleasePool* localpool = nil;
+    CV_FUNCNAME( "cvSetPropTopmost_COCOA" );
+
+    __BEGIN__;
+    if( name == NULL )
+    {
+        CV_ERROR( CV_StsNullPtr, "NULL name string" );
+    }
+
+    window = cvGetWindow(name);
+    if ( window == NULL )
+    {
+        CV_ERROR( CV_StsNullPtr, "NULL window" );
+    }
+
+    if ([[window contentView] isInFullScreenMode])
+    {
+        EXIT;
+    }
+
+    localpool = [[NSAutoreleasePool alloc] init];
+    if (topmost)
+    {
+        [window makeKeyAndOrderFront:window.self];
+        [window setLevel:CGWindowLevelForKey(kCGMaximumWindowLevelKey)];
+    }
+    else
+    {
+        [window makeKeyAndOrderFront:nil];
+    }
+    [localpool drain];
+    __END__;
+}
+
 void cv::setWindowTitle(const String& winname, const String& title)
 {
     CVWindow *window = cvGetWindow(winname.c_str());
@@ -735,6 +819,7 @@ void cv::setWindowTitle(const String& winname, const String& title)
 static NSSize constrainAspectRatio(NSSize base, NSSize constraint) {
     CGFloat heightDiff = (base.height / constraint.height);
     CGFloat widthDiff = (base.width / constraint.width);
+    if (heightDiff == 0) heightDiff = widthDiff;
     if (widthDiff == heightDiff) {
         return base;
     }
@@ -754,6 +839,8 @@ static NSSize constrainAspectRatio(NSSize base, NSSize constraint) {
 @synthesize mouseParam;
 @synthesize autosize;
 @synthesize firstContent;
+@synthesize x0;
+@synthesize y0;
 @synthesize sliders;
 @synthesize status;
 
@@ -908,9 +995,8 @@ static NSSize constrainAspectRatio(NSSize base, NSSize constraint) {
 - (void)setImageData:(CvArr *)arr {
     //cout << "setImageData" << endl;
     NSAutoreleasePool* localpool = [[NSAutoreleasePool alloc] init];
-    CvMat *arrMat, dst, stub;
 
-    arrMat = cvGetMat(arr, &stub);
+    cv::Mat arrMat = cv::cvarrToMat(arr);
     /*CGColorSpaceRef colorspace = NULL;
     CGDataProviderRef provider = NULL;
     int width = cvimage->width;
@@ -931,40 +1017,35 @@ static NSSize constrainAspectRatio(NSSize base, NSSize constraint) {
     }*/
 
     NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-                pixelsWide:arrMat->cols
-                pixelsHigh:arrMat->rows
+                pixelsWide:arrMat.cols
+                pixelsHigh:arrMat.rows
                 bitsPerSample:8
                 samplesPerPixel:3
                 hasAlpha:NO
                 isPlanar:NO
                 colorSpaceName:NSDeviceRGBColorSpace
                 bitmapFormat: kCGImageAlphaNone
-                bytesPerRow:((arrMat->cols * 3 + 3) & -4)
+                bytesPerRow:((arrMat.cols * 3 + 3) & -4)
                 bitsPerPixel:24];
 
     if (bitmap) {
-        cvInitMatHeader(&dst, arrMat->rows, arrMat->cols, CV_8UC3, [bitmap bitmapData], [bitmap bytesPerRow]);
-        cvConvertImage(arrMat, &dst, CV_CVTIMG_SWAP_RB);
+        cv::Mat dst(arrMat.rows, arrMat.cols, CV_8UC3, [bitmap bitmapData], [bitmap bytesPerRow]);
+        convertToShow(arrMat, dst);
     }
     else {
         // It's not guaranteed to like the bitsPerPixel:24, but this is a lot slower so we'd rather not do it
         bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-            pixelsWide:arrMat->cols
-            pixelsHigh:arrMat->rows
+            pixelsWide:arrMat.cols
+            pixelsHigh:arrMat.rows
             bitsPerSample:8
             samplesPerPixel:3
             hasAlpha:NO
             isPlanar:NO
             colorSpaceName:NSDeviceRGBColorSpace
-            bytesPerRow:(arrMat->cols * 4)
+            bytesPerRow:(arrMat.cols * 4)
             bitsPerPixel:32];
-        uint8_t *data = [bitmap bitmapData];
-        cvInitMatHeader(&dst, arrMat->rows, arrMat->cols, CV_8UC3, data, (arrMat->cols * 3));
-        cvConvertImage(arrMat, &dst, CV_CVTIMG_SWAP_RB);
-        for (int i = (arrMat->rows * arrMat->cols) - 1; i >= 0; i--) {
-            memmove(data + i * 4, data + i * 3, 3);
-            data[i * 4 + 3] = 0;
-        }
+        cv::Mat dst(arrMat.rows, arrMat.cols, CV_8UC4, [bitmap bitmapData], [bitmap bytesPerRow]);
+        convertToShow(arrMat, dst);
     }
 
     if( image ) {

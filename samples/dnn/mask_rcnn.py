@@ -43,7 +43,7 @@ def showLegend(classes):
         for i in range(len(classes)):
             block = legend[i * blockHeight:(i + 1) * blockHeight]
             block[:,:] = colors[i]
-            cv.putText(block, classes[i], (0, blockHeight/2), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
+            cv.putText(block, classes[i], (0, blockHeight//2), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
 
         cv.namedWindow('Legend', cv.WINDOW_NORMAL)
         cv.imshow('Legend', legend)
@@ -68,13 +68,13 @@ def drawBox(frame, classId, conf, left, top, right, bottom):
 
 
 # Load a network
-net = cv.dnn.readNet(args.model, args.config)
+net = cv.dnn.readNet(cv.samples.findFile(args.model), cv.samples.findFile(args.config))
 net.setPreferableBackend(cv.dnn.DNN_BACKEND_OPENCV)
 
 winName = 'Mask-RCNN in OpenCV'
 cv.namedWindow(winName, cv.WINDOW_NORMAL)
 
-cap = cv.VideoCapture(args.input if args.input else 0)
+cap = cv.VideoCapture(cv.samples.findFileOrKeep(args.input) if args.input else 0)
 legend = None
 while cv.waitKey(1) < 0:
     hasFrame, frame = cap.read()

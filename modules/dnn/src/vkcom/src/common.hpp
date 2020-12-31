@@ -29,6 +29,11 @@
 namespace cv { namespace dnn { namespace vkcom {
 
 #ifdef HAVE_VULKAN
+extern VkPhysicalDevice kPhysicalDevice;
+extern VkDevice kDevice;
+extern VkQueue kQueue;
+extern VkCommandPool kCmdPool;
+extern cv::Mutex kContextMtx;
 
 enum ShapeIdx
 {
@@ -42,7 +47,8 @@ enum ShapeIdx
 { \
         if (f != VK_SUCCESS) \
         { \
-            CV_LOG_WARNING(NULL, "Vulkan check failed"); \
+            CV_LOG_ERROR(NULL, "Vulkan check failed, result = " << (int)f); \
+            CV_Error(Error::StsError, "Vulkan check failed"); \
         } \
 }
 

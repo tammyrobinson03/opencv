@@ -87,7 +87,9 @@ double getMinVal(int depth)
     depth = CV_MAT_DEPTH(depth);
     double val = depth == CV_8U ? 0 : depth == CV_8S ? SCHAR_MIN : depth == CV_16U ? 0 :
     depth == CV_16S ? SHRT_MIN : depth == CV_32S ? INT_MIN :
-    depth == CV_32F ? -FLT_MAX : depth == CV_64F ? -DBL_MAX : -1;
+    depth == CV_32F ? -FLT_MAX : depth == CV_64F ? -DBL_MAX :
+            depth == CV_16F ? -65504
+            : -1;
     CV_Assert(val != -1);
     return val;
 }
@@ -97,7 +99,9 @@ double getMaxVal(int depth)
     depth = CV_MAT_DEPTH(depth);
     double val = depth == CV_8U ? UCHAR_MAX : depth == CV_8S ? SCHAR_MAX : depth == CV_16U ? USHRT_MAX :
     depth == CV_16S ? SHRT_MAX : depth == CV_32S ? INT_MAX :
-    depth == CV_32F ? FLT_MAX : depth == CV_64F ? DBL_MAX : -1;
+    depth == CV_32F ? FLT_MAX : depth == CV_64F ? DBL_MAX :
+            depth == CV_16F ? 65504
+            : -1;
     CV_Assert(val != -1);
     return val;
 }
@@ -1383,7 +1387,8 @@ double norm(InputArray _src1, InputArray _src2, int normType, InputArray _mask)
     int normType0 = normType;
     normType = normType == NORM_L2SQR ? NORM_L2 : normType;
 
-    CV_Assert( src1.type() == src2.type() && src1.size == src2.size );
+    CV_CheckTypeEQ(src1.type(), src2.type(), "");
+    CV_Assert(src1.size == src2.size);
     CV_Assert( mask.empty() || (src1.size == mask.size && mask.type() == CV_8U) );
     CV_Assert( normType == NORM_INF || normType == NORM_L1 || normType == NORM_L2 );
     const Mat *arrays[]={&src1, &src2, &mask, 0};
@@ -2727,7 +2732,7 @@ static void calcSobelKernel1D( int order, int _aperture_size, int size, vector<i
 
     if( _aperture_size < 0 )
     {
-        static const int scharr[] = { 3, 10, 3, -1, 0, 1 };
+        static const int scharr[8] = { 3, 10, 3, -1, 0, 1, 0, 0 };  // extra elements to eliminate "-Warray-bounds" bogus warning
         assert( size == 3 );
         for( i = 0; i < size; i++ )
             kernel[i] = scharr[order*3 + i];
@@ -2810,29 +2815,57 @@ Mat calcLaplaceKernel2D( int aperture_size )
 }
 
 
-void initUndistortMap( const Mat& _a0, const Mat& _k0, Size sz, Mat& _mapx, Mat& _mapy )
+void initUndistortMap( const Mat& _a0, const Mat& _k0, const Mat& _R0, const Mat& _new_cam0, Size sz, Mat& __mapx, Mat& __mapy, int map_type )
 {
-    _mapx.create(sz, CV_32F);
-    _mapy.create(sz, CV_32F);
+    Mat _mapx(sz, CV_32F), _mapy(sz, CV_32F);
 
-    double a[9], k[5]={0,0,0,0,0};
-    Mat _a(3, 3, CV_64F, a);
+    double a[9], k[5]={0,0,0,0,0}, iR[9]={1, 0, 0, 0, 1, 0, 0, 0, 1}, a1[9];
+    Mat _a(3, 3, CV_64F, a), _a1(3, 3, CV_64F, a1);
     Mat _k(_k0.rows,_k0.cols, CV_MAKETYPE(CV_64F,_k0.channels()),k);
+    Mat _iR(3, 3, CV_64F, iR);
     double fx, fy, cx, cy, ifx, ify, cxn, cyn;
 
+    CV_Assert(_k0.empty() ||
+              _k0.size() == Size(5, 1) ||
+              _k0.size() == Size(1, 5) ||
+              _k0.size() == Size(4, 1) ||
+              _k0.size() == Size(1, 4));
+    CV_Assert(_a0.size() == Size(3, 3));
+
     _a0.convertTo(_a, CV_64F);
-    _k0.convertTo(_k, CV_64F);
+    if( !_k0.empty() )
+        _k0.convertTo(_k, CV_64F);
+    if( !_R0.empty() )
+    {
+        CV_Assert(_R0.size() == Size(3, 3));
+        Mat tmp;
+        _R0.convertTo(tmp, CV_64F);
+        invert(tmp, _iR, DECOMP_LU);
+    }
+    if( !_new_cam0.empty() )
+    {
+        CV_Assert(_new_cam0.size() == Size(3, 3));
+        _new_cam0.convertTo(_a1, CV_64F);
+    }
+    else
+        _a.copyTo(_a1);
+
     fx = a[0]; fy = a[4]; cx = a[2]; cy = a[5];
-    ifx = 1./fx; ify = 1./fy;
-    cxn = cx;
-    cyn = cy;
+    ifx = 1./a1[0]; ify = 1./a1[4];
+    cxn = a1[2];
+    cyn = a1[5];
 
     for( int v = 0; v < sz.height; v++ )
     {
         for( int u = 0; u < sz.width; u++ )
         {
-            double x = (u - cxn)*ifx;
-            double y = (v - cyn)*ify;
+            double x_ = (u - cxn)*ifx;
+            double y_ = (v - cyn)*ify;
+            double X = iR[0]*x_ + iR[1]*y_ + iR[2];
+            double Y = iR[3]*x_ + iR[4]*y_ + iR[5];
+            double Z = iR[6]*x_ + iR[7]*y_ + iR[8];
+            double x = X/Z;
+            double y = Y/Z;
             double x2 = x*x, y2 = y*y;
             double r2 = x2 + y2;
             double cdist = 1 + (k[0] + (k[1] + k[4]*r2)*r2)*r2;
@@ -2843,8 +2876,10 @@ void initUndistortMap( const Mat& _a0, const Mat& _k0, Size sz, Mat& _mapx, Mat&
             _mapx.at<float>(v, u) = (float)(x1*fx + cx);
         }
     }
-}
 
+    _mapx.convertTo(__mapx, map_type);
+    _mapy.convertTo(__mapy, map_type);
+}
 
 std::ostream& operator << (std::ostream& out, const MatInfo& m)
 {

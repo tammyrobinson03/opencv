@@ -188,7 +188,7 @@ enum NormTypes {
                  norm =  \forkthree
                  { \| \texttt{src1} \| _{L_2} ^{2} = \sum_I \texttt{src1}(I)^2} {if  \(\texttt{normType} = \texttt{NORM_L2SQR}\)}
                  { \| \texttt{src1} - \texttt{src2} \| _{L_2} ^{2} =  \sum_I (\texttt{src1}(I) - \texttt{src2}(I))^2 }{if  \(\texttt{normType} = \texttt{NORM_L2SQR}\) }
-                 { \left(\frac{\|\texttt{src1}-\texttt{src2}\|_{L_2} }{\|\texttt{src2}\|_{L_2}}\right)^2 }{if  \(\texttt{normType} = \texttt{NORM_RELATIVE | NORM_L2}\) }
+                 { \left(\frac{\|\texttt{src1}-\texttt{src2}\|_{L_2} }{\|\texttt{src2}\|_{L_2}}\right)^2 }{if  \(\texttt{normType} = \texttt{NORM_RELATIVE | NORM_L2SQR}\) }
                  \f]
                  */
                  NORM_L2SQR     = 5,
@@ -301,8 +301,8 @@ CV_EXPORTS CV_NORETURN void error(int _code, const String& _err, const char* _fu
 
 // In practice, some macro are not processed correctly (noreturn is not detected).
 // We need to use simplified definition for them.
-#define CV_Error(...) do { abort(); } while (0)
-#define CV_Error_( code, args ) do { cv::format args; abort(); } while (0)
+#define CV_Error(code, msg) do { (void)(code); (void)(msg); abort(); } while (0)
+#define CV_Error_(code, args) do { (void)(code); (void)(cv::format args); abort(); } while (0)
 #define CV_Assert( expr ) do { if (!(expr)) abort(); } while (0)
 
 #else // CV_STATIC_ANALYSIS
@@ -325,7 +325,7 @@ This macro can be used to construct an error message on-fly to include some dyna
 for example:
 @code
     // note the extra parentheses around the formatted text message
-    CV_Error_( CV_StsOutOfRange,
+    CV_Error_(Error::StsOutOfRange,
     ("the value at (%d, %d)=%g is out of range", badPt.x, badPt.y, badValue));
 @endcode
 @param code one of Error::Code

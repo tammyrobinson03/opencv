@@ -317,12 +317,12 @@ public:
     struct Feature
     {
         Feature();
-        bool read( const FileNode& node );
+        bool read(const FileNode& node, const Size& origWinSize);
 
         bool tilted;
 
         enum { RECT_NUM = 3 };
-        struct
+        struct RectWeigth
         {
             Rect r;
             float weight;
@@ -412,7 +412,7 @@ public:
         Feature( int x, int y, int _block_w, int _block_h  ) :
                  rect(x, y, _block_w, _block_h) {}
 
-        bool read(const FileNode& node );
+        bool read(const FileNode& node, const Size& origWinSize);
 
         Rect rect; // weight and height for block
     };
@@ -647,4 +647,10 @@ inline int predictCategoricalStump( CascadeClassifierImpl& cascade,
     sum = (double)tmp;
     return 1;
 }
+
+namespace haar_cvt
+{
+bool convert(const FileNode& oldcascade_root, FileStorage& newfs);
+}
+
 }

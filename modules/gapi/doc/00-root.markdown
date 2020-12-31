@@ -12,6 +12,10 @@ specific CV algorithm. G-API provides means to define CV operations,
 construct graphs (in form of expressions) using it, and finally
 implement and run the operations for a particular backend.
 
+@note G-API is a new module and now is in active development. It's API
+is volatile at the moment and there may be minor but
+compatibility-breaking changes in the future.
+
 # Contents
 
 G-API documentation is organized into the following chapters:
@@ -60,7 +64,7 @@ included explicitly. The first four lines of `main()` create and
 initialize OpenCV's standard video capture object, which fetches
 video frames from either an attached camera or a specified file.
 
-G-API pipelie is constructed next. In fact, it is a series of G-API
+G-API pipeline is constructed next. In fact, it is a series of G-API
 operation calls on cv::GMat data. The important aspect of G-API is
 that this code block is just a declaration of actions, but not the
 actions themselves. No processing happens at this point, G-API only
@@ -91,7 +95,7 @@ Internally, cv::GComputation::apply() compiles the captured graph for
 the given input parameters and executes the compiled graph on data
 immediately.
 
-There is a number important concepts can be outlines with this examle:
+There is a number important concepts can be outlines with this example:
 * Graph declaration and graph execution are distinct steps;
 * Graph is built implicitly from a sequence of G-API expressions;
 * G-API supports function-like calls -- e.g. cv::gapi::resize(), and
@@ -103,7 +107,7 @@ There is a number important concepts can be outlines with this examle:
 
 <!-- FIXME: The above operator|() link links to MatExpr not GAPI -->
 
-See Tutorial[TBD] and Porting examples[TBD] to learn more on various
-G-API features and concepts.
+See [tutorials and porting examples](@ref tutorial_table_of_content_gapi)
+to learn more on various G-API features and concepts.
 
 <!-- TODO Add chapter on declaration, compilation, execution -->

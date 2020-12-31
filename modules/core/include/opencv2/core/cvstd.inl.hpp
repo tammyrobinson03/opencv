@@ -46,6 +46,7 @@
 
 #include <complex>
 #include <ostream>
+#include <sstream>
 
 //! @cond IGNORED
 
@@ -72,32 +73,6 @@ public:
 
     typedef Vec<channel_type, channels> vec_type;
 };
-
-inline
-FileNode::operator std::string() const
-{
-    String value;
-    read(*this, value, value);
-    return value;
-}
-
-template<> inline
-void operator >> (const FileNode& n, std::string& value)
-{
-    read(n, value, std::string());
-}
-
-template<> inline
-FileStorage& operator << (FileStorage& fs, const std::string& value)
-{
-    return fs << cv::String(value);
-}
-
-static inline
-std::ostream& operator << (std::ostream& os, const String& str)
-{
-    return os << str.c_str();
-}
 
 static inline
 std::ostream& operator << (std::ostream& out, Ptr<Formatted> fmtd)

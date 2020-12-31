@@ -45,6 +45,13 @@
 #ifdef HAVE_OPENGL
 #  include "gl_core_3_1.hpp"
 #  ifdef HAVE_CUDA
+#    if (defined(__arm__) || defined(__aarch64__)) \
+         && !defined(OPENCV_SKIP_CUDA_OPENGL_ARM_WORKAROUND)
+#      include <GL/gl.h>
+#      ifndef GL_VERSION
+#        define GL_VERSION 0x1F02
+#      endif
+#    endif
 #    include <cuda_gl_interop.h>
 #  endif
 #else // HAVE_OPENGL
@@ -1568,6 +1575,7 @@ void cv::ogl::render(const ogl::Arrays& arr, InputArray indices, int mode, Scala
 // CL-GL Interoperability
 
 #ifdef HAVE_OPENCL
+#  include "opencv2/core/opencl/runtime/opencl_core.hpp"
 #  include "opencv2/core/opencl/runtime/opencl_gl.hpp"
 #  ifdef cl_khr_gl_sharing
 #    define HAVE_OPENCL_OPENGL_SHARING
@@ -1587,6 +1595,34 @@ void cv::ogl::render(const ogl::Arrays& arr, InputArray indices, int mode, Scala
 #endif // HAVE_OPENGL
 
 namespace cv { namespace ogl {
+
+#if defined(HAVE_OPENCL) && defined(HAVE_OPENGL) && defined(HAVE_OPENCL_OPENGL_SHARING)
+// Check to avoid crash in OpenCL runtime: https://github.com/opencv/opencv/issues/5209
+static void checkOpenCLVersion()
+{
+    using namespace cv::ocl;
+    const Device& device = Device::getDefault();
+    //CV_Assert(!device.empty());
+    cl_device_id dev = (cl_device_id)device.ptr();
+    CV_Assert(dev);
+
+    cl_platform_id platform_id = 0;
+    size_t sz = 0;
+
+    cl_int status = clGetDeviceInfo(dev, CL_DEVICE_PLATFORM, sizeof(platform_id), &platform_id, &sz);
+    CV_Assert(status == CL_SUCCESS && sz == sizeof(cl_platform_id));
+    CV_Assert(platform_id);
+
+    PlatformInfo pi(&platform_id);
+    int versionMajor = pi.versionMajor();
+    int versionMinor = pi.versionMinor();
+    if (versionMajor < 1 || (versionMajor == 1 && versionMinor <= 1))
+        CV_Error_(cv::Error::OpenCLApiCallError,
+            ("OpenCL: clCreateFromGLTexture requires OpenCL 1.2+ version: %d.%d - %s (%s)",
+                versionMajor, versionMinor, pi.name().c_str(), pi.version().c_str())
+        );
+}
+#endif
 
 namespace ocl {
 
@@ -1682,9 +1718,14 @@ Context& initializeContextFromGL()
     if (found < 0)
         CV_Error(cv::Error::OpenCLInitError, "OpenCL: Can't create context for OpenGL interop");
 
-    Context& ctx = Context::getDefault(false);
-    initializeContextFromHandle(ctx, platforms[found], context, device);
-    return ctx;
+    cl_platform_id platform = platforms[found];
+    std::string platformName = PlatformInfo(&platform).name();
+
+    OpenCLExecutionContext clExecCtx = OpenCLExecutionContext::create(platformName, platform, context, device);
+    clReleaseDevice(device);
+    clReleaseContext(context);
+    clExecCtx.bind();
+    return const_cast<Context&>(clExecCtx.getContext());
 #endif
 }
 
@@ -1707,6 +1748,8 @@ void convertToGLTexture2D(InputArray src, Texture2D& texture)
     Context& ctx = Context::getDefault();
     cl_context context = (cl_context)ctx.ptr();
 
+    checkOpenCLVersion();  // clCreateFromGLTexture requires OpenCL 1.2
+
     UMat u = src.getUMat();
 
     // TODO Add support for roi
@@ -1726,7 +1769,7 @@ void convertToGLTexture2D(InputArray src, Texture2D& texture)
         CV_Error(cv::Error::OpenCLApiCallError, "OpenCL: clEnqueueAcquireGLObjects failed");
     size_t offset = 0; // TODO
     size_t dst_origin[3] = {0, 0, 0};
-    size_t region[3] = {u.cols, u.rows, 1};
+    size_t region[3] = { (size_t)u.cols, (size_t)u.rows, 1};
     status = clEnqueueCopyBufferToImage(q, clBuffer, clImage, offset, dst_origin, region, 0, NULL, NULL);
     if (status != CL_SUCCESS)
         CV_Error(cv::Error::OpenCLApiCallError, "OpenCL: clEnqueueCopyBufferToImage failed");
@@ -1765,6 +1808,8 @@ void convertFromGLTexture2D(const Texture2D& texture, OutputArray dst)
     Context& ctx = Context::getDefault();
     cl_context context = (cl_context)ctx.ptr();
 
+    checkOpenCLVersion();  // clCreateFromGLTexture requires OpenCL 1.2
+
     // TODO Need to specify ACCESS_WRITE here somehow to prevent useless data copying!
     dst.create(texture.size(), textureType);
     UMat u = dst.getUMat();
@@ -1786,7 +1831,7 @@ void convertFromGLTexture2D(const Texture2D& texture, OutputArray dst)
         CV_Error(cv::Error::OpenCLApiCallError, "OpenCL: clEnqueueAcquireGLObjects failed");
     size_t offset = 0; // TODO
     size_t src_origin[3] = {0, 0, 0};
-    size_t region[3] = {u.cols, u.rows, 1};
+    size_t region[3] = { (size_t)u.cols, (size_t)u.rows, 1};
     status = clEnqueueCopyImageToBuffer(q, clImage, clBuffer, src_origin, region, offset, 0, NULL, NULL);
     if (status != CL_SUCCESS)
         CV_Error(cv::Error::OpenCLApiCallError, "OpenCL: clEnqueueCopyImageToBuffer failed");

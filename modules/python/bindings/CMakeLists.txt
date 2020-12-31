@@ -11,7 +11,7 @@ set(PYTHON_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../")
 # get list of modules to wrap
 set(OPENCV_PYTHON_MODULES)
 foreach(m ${OPENCV_MODULES_BUILD})
-  if (";${OPENCV_MODULE_${m}_WRAPPERS};" MATCHES ";${MODULE_NAME};" AND HAVE_${m})
+  if (";${OPENCV_MODULE_${m}_WRAPPERS};" MATCHES ";python;" AND HAVE_${m})
     list(APPEND OPENCV_PYTHON_MODULES ${m})
     #message(STATUS "\t${m}")
   endif()
@@ -42,6 +42,8 @@ ocv_list_filterout(opencv_hdrs "modules/.*\\\\.inl\\\\.h*")
 ocv_list_filterout(opencv_hdrs "modules/.*_inl\\\\.h*")
 ocv_list_filterout(opencv_hdrs "modules/.*\\\\.details\\\\.h*")
 ocv_list_filterout(opencv_hdrs "modules/.*\\\\.private\\\\.h*")
+ocv_list_filterout(opencv_hdrs "modules/.*/private\\\\.h*")
+ocv_list_filterout(opencv_hdrs "modules/.*/legacy/.*")
 ocv_list_filterout(opencv_hdrs "modules/.*/detection_based_tracker\\\\.hpp") # Conditional compilation
 if(NOT HAVE_CUDA)
   ocv_list_filterout(opencv_hdrs "modules/cuda.*")
@@ -49,11 +51,13 @@ if(NOT HAVE_CUDA)
 endif()
 
 set(cv2_generated_files
-    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_include.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_enums.h"
     "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_funcs.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_include.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_modules.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_modules_content.h"
     "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_types.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_type_reg.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_ns_reg.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyopencv_generated_types_content.h"
     "${OPENCV_PYTHON_SIGNATURES_FILE}"
 )
 
@@ -104,6 +108,7 @@ ocv_cmake_script_append_var(PYTHON_CONFIG_SCRIPT
 
     CMAKE_MODULE_LINKER_FLAGS
     CMAKE_INSTALL_PREFIX
+    OPENCV_PYTHON_INSTALL_PATH
 
     OpenCV_SOURCE_DIR
 

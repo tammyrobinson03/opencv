@@ -6,6 +6,7 @@
 #include "opencv2/core/base.hpp"
 #include "cap_mfx_common.hpp"
 #include "opencv2/imgproc/hal/hal.hpp"
+#include "cap_interface.hpp"
 
 using namespace cv;
 using namespace std;
@@ -111,6 +112,7 @@ VideoCapture_IntelMFX::VideoCapture_IntelMFX(const cv::String &filename)
         return;
     }
 
+    frameSize = Size(params.mfx.FrameInfo.CropW, params.mfx.FrameInfo.CropH);
     good = true;
 }
 
@@ -126,10 +128,23 @@ VideoCapture_IntelMFX::~VideoCapture_IntelMFX()
     cleanup(deviceHandler);
 }
 
-double VideoCapture_IntelMFX::getProperty(int) const
+double VideoCapture_IntelMFX::getProperty(int prop) const
 {
-    MSG(cerr << "MFX: getProperty() is not implemented" << endl);
-    return 0;
+    if (!good)
+    {
+        MSG(cerr << "MFX: can not call getProperty(), backend has not been initialized" << endl);
+        return 0;
+    }
+    switch (prop)
+    {
+        case CAP_PROP_FRAME_WIDTH:
+            return frameSize.width;
+        case CAP_PROP_FRAME_HEIGHT:
+            return frameSize.height;
+        default:
+            MSG(cerr << "MFX: unsupported property" << endl);
+            return 0;
+    }
 }
 
 bool VideoCapture_IntelMFX::setProperty(int, double)
@@ -214,7 +229,7 @@ bool VideoCapture_IntelMFX::grabFrame()
         else if (res == MFX_WRN_DEVICE_BUSY)
         {
             DBG(cout << "Waiting for device" << endl);
-            sleep(1);
+            sleep_ms(1000);
             continue;
         }
         else if (res == MFX_WRN_VIDEO_PARAM_CHANGED)
@@ -264,3 +279,8 @@ int VideoCapture_IntelMFX::getCaptureDomain()
 }
 
 //==================================================================================================
+
+cv::Ptr<IVideoCapture> cv::create_MFX_capture(const std::string &filename)
+{
+    return cv::makePtr<VideoCapture_IntelMFX>(filename);
+}

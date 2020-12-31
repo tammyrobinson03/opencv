@@ -3,16 +3,18 @@
 // of this distribution and at http://opencv.org/license.html.
 
 #include "test_precomp.hpp"
-#ifdef HAVE_GSTREAMER
 
 namespace opencv_test
 {
 
 typedef tuple< string, Size, Size, int > Param;
-typedef testing::TestWithParam< Param > Videoio_Gstreamer_Test;
+typedef testing::TestWithParam< Param > videoio_gstreamer;
 
-TEST_P(Videoio_Gstreamer_Test, test_object_structure)
+TEST_P(videoio_gstreamer, read_write)
 {
+    if (!videoio_registry::hasBackend(CAP_GSTREAMER))
+        throw SkipTestException("GStreamer backend was not found");
+
     string format    = get<0>(GetParam());
     Size frame_size  = get<1>(GetParam());
     Size mat_size    = get<2>(GetParam());
@@ -69,8 +71,65 @@ Param test_data[] = {
     make_tuple("jpegenc ! image/jpeg"     , Size(640, 480), Size(640, 480), COLOR_BGR2RGB)
 };
 
-INSTANTIATE_TEST_CASE_P(videoio, Videoio_Gstreamer_Test, testing::ValuesIn(test_data));
+INSTANTIATE_TEST_CASE_P(videoio, videoio_gstreamer, testing::ValuesIn(test_data));
+
+TEST(videoio_gstreamer, unsupported_pipeline)
+{
+    if (!videoio_registry::hasBackend(CAP_GSTREAMER))
+        throw SkipTestException("GStreamer backend was not found");
+
+    // could not link videoconvert0 to matroskamux0, matroskamux0 can't handle caps video/x-raw, format=(string)RGBA
+    std::string pipeline = "appsrc ! videoconvert ! video/x-raw, format=(string)RGBA ! matroskamux ! filesink location=test.mkv";
+    Size frame_size(640, 480);
+
+    VideoWriter writer;
+    EXPECT_NO_THROW(writer.open(pipeline, CAP_GSTREAMER, 0/*fourcc*/, 30/*fps*/, frame_size, true));
+    EXPECT_FALSE(writer.isOpened());
+    // no frames
+    EXPECT_NO_THROW(writer.release());
+
+}
+
+TEST(videoio_gstreamer, gray16_writing)
+{
+    if (!videoio_registry::hasBackend(CAP_GSTREAMER))
+        throw SkipTestException("GStreamer backend was not found");
+
+    Size frame_size(320, 240);
+
+    // generate a noise frame
+    Mat frame = Mat(frame_size, CV_16U);
+    randu(frame, 0, 65535);
+
+    // generate a temp filename, and fix path separators to how GStreamer expects them
+    cv::String temp_file = cv::tempfile(".raw");
+    std::replace(temp_file.begin(), temp_file.end(), '\\', '/');
+
+    // write noise frame to file using GStreamer
+    std::ostringstream writer_pipeline;
+    writer_pipeline << "appsrc ! filesink location=" << temp_file;
+    std::vector<int> params {
+        VIDEOWRITER_PROP_IS_COLOR, 0/*false*/,
+        VIDEOWRITER_PROP_DEPTH, CV_16U
+    };
+    VideoWriter writer;
+    ASSERT_NO_THROW(writer.open(writer_pipeline.str(), CAP_GSTREAMER, 0/*fourcc*/, 30/*fps*/, frame_size, params));
+    ASSERT_TRUE(writer.isOpened());
+    ASSERT_NO_THROW(writer.write(frame));
+    ASSERT_NO_THROW(writer.release());
+
+    // read noise frame back in
+    Mat written_frame(frame_size, CV_16U);
+    std::ifstream fs(temp_file, std::ios::in | std::ios::binary);
+    fs.read((char*)written_frame.ptr(0), frame_size.width * frame_size.height * 2);
+    ASSERT_TRUE(fs);
+    fs.close();
+
+    // compare to make sure it's identical
+    EXPECT_EQ(0, cv::norm(frame, written_frame, NORM_INF));
+
+    // remove temp file
+    EXPECT_EQ(0, remove(temp_file.c_str()));
+}
 
 } // namespace
-
-#endif

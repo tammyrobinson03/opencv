@@ -10,7 +10,9 @@
 using namespace cv;
 using namespace std;
 
+//! [calcGST_proto]
 void calcGST(const Mat& inputImg, Mat& imgCoherencyOut, Mat& imgOrientationOut, int w);
+//! [calcGST_proto]
 
 int main()
 {
@@ -26,6 +28,7 @@ int main()
         return -1;
     }
 
+    //! [main_extra]
     //! [main]
     Mat imgCoherency, imgOrientation;
     calcGST(imgIn, imgCoherency, imgOrientation, W);
@@ -45,37 +48,41 @@ int main()
 
     normalize(imgCoherency, imgCoherency, 0, 255, NORM_MINMAX);
     normalize(imgOrientation, imgOrientation, 0, 255, NORM_MINMAX);
+
     imwrite("result.jpg", 0.5*(imgIn + imgBin));
     imwrite("Coherency.jpg", imgCoherency);
     imwrite("Orientation.jpg", imgOrientation);
+    //! [main_extra]
     return 0;
 }
 //! [calcGST]
+//! [calcJ_header]
 void calcGST(const Mat& inputImg, Mat& imgCoherencyOut, Mat& imgOrientationOut, int w)
 {
     Mat img;
-    inputImg.convertTo(img, CV_64F);
+    inputImg.convertTo(img, CV_32F);
 
     // GST components calculation (start)
     // J =  (J11 J12; J12 J22) - GST
     Mat imgDiffX, imgDiffY, imgDiffXY;
-    Sobel(img, imgDiffX, CV_64F, 1, 0, 3);
-    Sobel(img, imgDiffY, CV_64F, 0, 1, 3);
+    Sobel(img, imgDiffX, CV_32F, 1, 0, 3);
+    Sobel(img, imgDiffY, CV_32F, 0, 1, 3);
     multiply(imgDiffX, imgDiffY, imgDiffXY);
+    //! [calcJ_header]
 
     Mat imgDiffXX, imgDiffYY;
     multiply(imgDiffX, imgDiffX, imgDiffXX);
     multiply(imgDiffY, imgDiffY, imgDiffYY);
 
     Mat J11, J22, J12;      // J11, J22 and J12 are GST components
-    boxFilter(imgDiffXX, J11, CV_64F, Size(w, w));
-    boxFilter(imgDiffYY, J22, CV_64F, Size(w, w));
-    boxFilter(imgDiffXY, J12, CV_64F, Size(w, w));
+    boxFilter(imgDiffXX, J11, CV_32F, Size(w, w));
+    boxFilter(imgDiffYY, J22, CV_32F, Size(w, w));
+    boxFilter(imgDiffXY, J12, CV_32F, Size(w, w));
     // GST components calculation (stop)
 
     // eigenvalue calculation (start)
-    // lambda1 = J11 + J22 + sqrt((J11-J22)^2 + 4*J12^2)
-    // lambda2 = J11 + J22 - sqrt((J11-J22)^2 + 4*J12^2)
+    // lambda1 = 0.5*(J11 + J22 + sqrt((J11-J22)^2 + 4*J12^2))
+    // lambda2 = 0.5*(J11 + J22 - sqrt((J11-J22)^2 + 4*J12^2))
     Mat tmp1, tmp2, tmp3, tmp4;
     tmp1 = J11 + J22;
     tmp2 = J11 - J22;
@@ -84,8 +91,10 @@ void calcGST(const Mat& inputImg, Mat& imgCoherencyOut, Mat& imgOrientationOut, 
     sqrt(tmp2 + 4.0 * tmp3, tmp4);
 
     Mat lambda1, lambda2;
-    lambda1 = tmp1 + tmp4;      // biggest eigenvalue
-    lambda2 = tmp1 - tmp4;      // smallest eigenvalue
+    lambda1 = tmp1 + tmp4;
+    lambda1 = 0.5*lambda1;      // biggest eigenvalue
+    lambda2 = tmp1 - tmp4;
+    lambda2 = 0.5*lambda2;      // smallest eigenvalue
     // eigenvalue calculation (stop)
 
     // Coherency calculation (start)

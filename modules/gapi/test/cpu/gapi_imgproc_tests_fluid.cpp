@@ -2,257 +2,219 @@
 // It is subject to the license terms in the LICENSE file found in the top-level directory
 // of this distribution and at http://opencv.org/license.html.
 //
-// Copyright (C) 2018 Intel Corporation
+// Copyright (C) 2018-2019 Intel Corporation
 
 
 #include "../test_precomp.hpp"
 #include "../common/gapi_imgproc_tests.hpp"
-#include "backends/fluid/gfluidimgproc.hpp"
 
-#define IMGPROC_FLUID cv::gapi::imgproc::fluid::kernels()
+namespace
+{
+#define IMGPROC_FLUID [] () { return cv::compile_args(cv::gapi::use_only{cv::gapi::imgproc::fluid::kernels()}); }
+}  // anonymous namespace
 
 namespace opencv_test
 {
 
-class AbsExactFluid : public Wrappable<AbsExactFluid>
-{
-public:
-    AbsExactFluid() {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const { return cv::countNonZero(in1 != in2) == 0; }
-private:
-};
-
-
-class AbsToleranceFluid : public Wrappable<AbsToleranceFluid>
-{
-public:
-    AbsToleranceFluid(double tol) : _tol(tol) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        cv::Mat absDiff; cv::absdiff(in1, in2, absDiff);
-        return cv::countNonZero(absDiff > _tol) == 0;
-    }
-private:
-    double _tol;
-};
-
-class AbsTolerance32FFluid : public Wrappable<AbsTolerance32FFluid>
-{
-public:
-    AbsTolerance32FFluid(double tol) : _tol(tol) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        if (CV_MAT_DEPTH(in1.type()) == CV_32F)
-            return ((cv::countNonZero(cv::abs(in1 - in2) > (_tol)*cv::abs(in2))) ? false : true);
-        else
-            return ((cv::countNonZero(in1 != in2) <= (_tol * 100) * in2.total()) ? true : false);
-    }
-private:
-    double _tol;
-};
-
-class AbsToleranceSepFilterFluid : public Wrappable<AbsToleranceSepFilterFluid>
-{
-public:
-    AbsToleranceSepFilterFluid(double tol) : _tol(tol) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        return ((cv::countNonZero(cv::abs(in1 - in2) > (_tol)* cv::abs(in2)) <= 0.01 * in2.total()) ? true : false);
-    }
-private:
-    double _tol;
-};
-
-class AbsToleranceGaussianBlurFluid : public Wrappable<AbsToleranceGaussianBlurFluid>
-{
-public:
-    AbsToleranceGaussianBlurFluid(double tol) : _tol(tol) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        if (CV_MAT_DEPTH(in1.type()) == CV_32F || CV_MAT_DEPTH(in1.type()) == CV_64F)
-        {
-            return ((cv::countNonZero(cv::abs(in1 - in2) > (_tol)*cv::abs(in2))) ? false : true);
-        }
-        else
-        {
-            if (CV_MAT_DEPTH(in1.type()) == CV_8U)
-            {
-                bool a = (cv::countNonZero(cv::abs(in1 - in2) > 1) <= _tol * in2.total());
-                return ((a == 1 ? 0 : 1) && ((cv::countNonZero(cv::abs(in1 - in2) > 2) <= 0) == 1 ? 0 : 1)) == 1 ? false : true;
-            }
-            else return cv::countNonZero(in1 != in2)==0;
-        }
-    }
-private:
-    double _tol;
-};
-
-class AbsToleranceRGBBGRFluid : public Wrappable<AbsToleranceRGBBGRFluid>
-{
-public:
-    AbsToleranceRGBBGRFluid(double tol) : _tol(tol) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        bool a = (cv::countNonZero((in1 - in2) > 0) <= _tol * in2.total());
-        return ((a == 1 ? 0 : 1) && ((cv::countNonZero((in1 - in2) > 1) <= 0) == 1 ? 0 : 1)) == 1 ? false : true;
-    }
-private:
-    double _tol;
-};
-
-class ToleranceTripleFluid : public Wrappable<ToleranceTripleFluid>
-{
-public:
-    ToleranceTripleFluid(double tol1, double tol2, double tol3) : _tol1(tol1), _tol2(tol2), _tol3(tol3) {}
-    bool operator() (const cv::Mat& in1, const cv::Mat& in2) const
-    {
-        bool a = (cv::countNonZero((in1 - in2) > 0) <= _tol1 * in2.total());
-        return (((a == 1 ? 0 : 1) &&
-            ((cv::countNonZero((in1 - in2) > 1) <= _tol2 * in2.total()) == 1 ? 0 : 1) &&
-            ((cv::countNonZero((in1 - in2) > 2) <= _tol3 * in2.total()) == 1 ? 0 : 1))) == 1 ? false : true;
-    }
-private:
-    double _tol1, _tol2, _tol3;
-};
-
 INSTANTIATE_TEST_CASE_P(RGB2GrayTestFluid, RGB2GrayTest,
-                        Combine(Values(AbsToleranceRGBBGRFluid(0.001).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
-                                cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                       cv::Size(640, 480)),
+                                Values(CV_8UC1),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(BGR2GrayTestFluid, BGR2GrayTest,
-                        Combine(Values(AbsToleranceRGBBGRFluid(0.001).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(CV_8UC1),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(RGB2YUVTestFluid, RGB2YUVTest,
-                        Combine(Values(AbsToleranceRGBBGRFluid(0.15*3).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(YUV2RGBTestFluid, YUV2RGBTest,
-                        Combine(Values(ToleranceTripleFluid(0.25 * 3, 0.01 * 3, 1e-5 * 3).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(RGB2LabTestFluid, RGB2LabTest,
-                        Combine(Values(ToleranceTripleFluid(0.25 * 3, 0.0, 1e-5 * 3).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsSimilarPoints(1, 0.05).to_compare_obj())));
 
 // FIXME: Not supported by Fluid yet (no kernel implemented)
 INSTANTIATE_TEST_CASE_P(BGR2LUVTestFluid, BGR2LUVTest,
-                        Combine(Values(ToleranceTripleFluid(0.25 * 3, 0.01 * 3, 0.0001 * 3).to_compare_f()),
+                        Combine(Values(CV_8UC3),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(5e-3, 6).to_compare_obj())));
+
+INSTANTIATE_TEST_CASE_P(RGB2HSVTestFluid, RGB2HSVTest,
+                        Combine(Values(CV_8UC3),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
+
+INSTANTIATE_TEST_CASE_P(BayerGR2RGBTestFluid, BayerGR2RGBTest,
+                        Combine(Values(CV_8UC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(CV_8UC3),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceColor(1e-3).to_compare_obj())));
+
+INSTANTIATE_TEST_CASE_P(RGB2YUV422TestFluid, RGB2YUV422Test,
+                        Combine(Values(CV_8UC3),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(CV_8UC2),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsTolerance(1).to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(blurTestFluid, BlurTest,
-                        Combine(Values(AbsToleranceFluid(0.0).to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(cv::BORDER_DEFAULT),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(-1),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
+                                Values(cv::BORDER_DEFAULT)));
 
 INSTANTIATE_TEST_CASE_P(gaussBlurTestFluid, GaussianBlurTest,
-                        Combine(Values(AbsToleranceGaussianBlurFluid(1e-6).to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(-1),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-3f, 0.01).to_compare_obj()),
+                                Values(3, 5)));
 
 INSTANTIATE_TEST_CASE_P(medianBlurTestFluid, MedianBlurTest,
-                        Combine(Values(AbsExactFluid().to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(-1),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(3))); // add kernel size=5 when implementation is ready
 
 INSTANTIATE_TEST_CASE_P(erodeTestFluid, ErodeTest,
-                        Combine(Values(AbsExactFluid().to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
+                                Values(-1),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
                                 Values(cv::MorphShapes::MORPH_RECT,
                                        cv::MorphShapes::MORPH_CROSS,
-                                       cv::MorphShapes::MORPH_ELLIPSE),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                       cv::MorphShapes::MORPH_ELLIPSE)));
 
 INSTANTIATE_TEST_CASE_P(dilateTestFluid, DilateTest,
-                        Combine(Values(AbsExactFluid().to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
+                                Values(-1),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
                                 Values(cv::MorphShapes::MORPH_RECT,
                                        cv::MorphShapes::MORPH_CROSS,
-                                       cv::MorphShapes::MORPH_ELLIPSE),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                       cv::MorphShapes::MORPH_ELLIPSE)));
 
 INSTANTIATE_TEST_CASE_P(SobelTestFluid, SobelTest,
-                        Combine(Values(AbsExactFluid().to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(-1, CV_32F),
+                                Values(-1, CV_16S, CV_32F),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
                                 Values(0, 1),
+                                Values(1, 2)));
+
+INSTANTIATE_TEST_CASE_P(SobelTestFluid32F, SobelTest,
+                        Combine(Values(CV_32FC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(CV_32F),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
+                                Values(0, 1),
+                                Values(1, 2)));
+
+INSTANTIATE_TEST_CASE_P(SobelXYTestFluid, SobelXYTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_16UC1, CV_16SC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(-1, CV_16S, CV_32F),
+                                Values(IMGPROC_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(3),
                                 Values(1, 2),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(BORDER_CONSTANT, BORDER_REPLICATE, BORDER_REFLECT_101),
+                                Values(0, 1, 255)));
+
+INSTANTIATE_TEST_CASE_P(SobelXYTestFluid32F, SobelXYTest,
+                        Combine(Values(CV_32FC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(CV_32F),
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(3),
+                                Values(1, 2),
+                                Values(BORDER_CONSTANT, BORDER_REPLICATE, BORDER_REFLECT_101),
+                                Values(0, 1, 255)));
 
 INSTANTIATE_TEST_CASE_P(boxFilterTestFluid32, BoxFilterTest,
-                        Combine(Values(AbsTolerance32FFluid(1e-6).to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
-                                Values(cv::BORDER_DEFAULT),
                                 Values(-1, CV_32F),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(3), // add kernel size=5 when implementation is ready
+                                Values(cv::BORDER_DEFAULT)));
 
 INSTANTIATE_TEST_CASE_P(sepFilterTestFluid, SepFilterTest,
-                        Combine(Values(AbsToleranceSepFilterFluid(1e-5f).to_compare_f()),
-                                Values(CV_32FC1),
-                                Values(3), // add kernel size=5 when implementation is ready
+                        Combine(Values(CV_32FC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480)),
                                 Values(-1, CV_32F),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(3))); // add kernel size=5 when implementation is ready
 
 INSTANTIATE_TEST_CASE_P(filter2DTestFluid, Filter2DTest,
-                        Combine(Values(AbsTolerance32FFluid(1e-6).to_compare_f()),
-                                Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                Values(3), // add kernel size=4,5,7 when implementation ready
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480),
                                        cv::Size(128, 128)),
-                                Values(cv::BORDER_DEFAULT),
                                 Values(-1, CV_32F),
-                                Values(true, false),
-                                Values(cv::compile_args(IMGPROC_FLUID))));
+                                Values(IMGPROC_FLUID),
+                                Values(ToleranceFilter(1e-4f, 0.01).to_compare_obj()),
+                                Values(cv::Size(3, 3)), // add kernel size=4x4,5x5,7x7 when implementation ready
+                                Values(cv::BORDER_DEFAULT)));
 
 } // opencv_test

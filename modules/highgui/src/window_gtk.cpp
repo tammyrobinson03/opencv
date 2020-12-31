@@ -140,8 +140,8 @@ void cvImageWidgetSetImage(CvImageWidget * widget, const CvArr *arr){
         widget->original_image = cvCreateMat( mat->rows, mat->cols, CV_8UC3 );
         gtk_widget_queue_resize( GTK_WIDGET( widget ) );
     }
-    cvConvertImage( mat, widget->original_image,
-                            (origin != 0 ? CV_CVTIMG_FLIP : 0) + CV_CVTIMG_SWAP_RB );
+    CV_Assert(origin == 0);
+    convertToShow(cv::cvarrToMat(arr), widget->original_image);
     if(widget->scaled_image){
         cvResize( widget->original_image, widget->scaled_image, CV_INTER_AREA );
     }
@@ -612,19 +612,33 @@ static std::vector< Ptr<CvWindow> > g_windows;
 CV_IMPL int cvInitSystem( int argc, char** argv )
 {
     static int wasInitialized = 0;
+    static bool hasError = false;
 
     // check initialization status
     if( !wasInitialized )
     {
-        gtk_init( &argc, &argv );
+        if (!gtk_init_check(&argc, &argv))
+        {
+            hasError = true;
+            wasInitialized = true;
+            CV_Error(Error::StsError, "Can't initialize GTK backend");
+        }
+
         setlocale(LC_NUMERIC,"C");
 
         #ifdef HAVE_OPENGL
-            gtk_gl_init(&argc, &argv);
+            if (!gtk_gl_init_check(&argc, &argv))
+            {
+                hasError = true;
+                wasInitialized = true;
+                CV_Error(Error::StsError, "Can't initialize GTK-OpenGL backend");
+            }
         #endif
 
         wasInitialized = 1;
     }
+    if (hasError)
+       CV_Error(Error::StsError, "GTK backend is not available");
 
     return 0;
 }
@@ -634,10 +648,13 @@ CV_IMPL int cvStartWindowThread(){
     cvInitSystem(0,NULL);
     if (!thread_started)
     {
-       if (!g_thread_supported ()) {
+#if !GLIB_CHECK_VERSION(2, 32, 0)  // https://github.com/GNOME/glib/blame/b4d58a7105bb9d75907233968bb534b38f9a6e43/glib/deprecated/gthread.h#L274
+       if (!g_thread_supported ())
+       {
            /* the GThread system wasn't inited, so init it */
            g_thread_init(NULL);
        }
+#endif
 
        (void)getWindowMutex();  // force mutex initialization
 
@@ -1806,7 +1823,7 @@ static gboolean icvOnMouse( GtkWidget *widget, GdkEvent *event, gpointer user_da
     else if( event->type == GDK_SCROLL )
     {
 #if defined(GTK_VERSION3_4)
-        // NOTE: in current implementation doesn't possible to put into callback function delta_x and delta_y separetely
+        // NOTE: in current implementation doesn't possible to put into callback function delta_x and delta_y separately
         double delta = (event->scroll.delta_x + event->scroll.delta_y);
         cv_event   = (event->scroll.delta_y!=0) ? CV_EVENT_MOUSEHWHEEL : CV_EVENT_MOUSEWHEEL;
 #else

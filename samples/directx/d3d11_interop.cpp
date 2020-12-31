@@ -83,7 +83,7 @@ public:
         r = m_pD3D11SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&m_pBackBuffer);
         if (FAILED(r))
         {
-            throw std::runtime_error("GetBufer() failed!");
+            throw std::runtime_error("GetBuffer() failed!");
         }
 
         r = m_pD3D11Dev->CreateRenderTargetView(m_pBackBuffer, NULL, &m_pRenderTarget);
@@ -378,7 +378,7 @@ public:
             }
         } // try
 
-        catch (cv::Exception& e)
+        catch (const cv::Exception& e)
         {
             std::cerr << "Exception: " << e.what() << std::endl;
             cleanup();

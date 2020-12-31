@@ -43,11 +43,19 @@
 #include "../precomp.hpp"
 #include "layers_common.hpp"
 #include "../op_inf_engine.hpp"
+#include "../ie_ngraph.hpp"
+#include "../op_cuda.hpp"
+
 #include <opencv2/dnn/shape_utils.hpp>
 
 #ifdef HAVE_OPENCL
 #include "../ocl4dnn/include/math_functions.hpp"
 #include "opencl_kernels_dnn.hpp"
+#endif
+
+#ifdef HAVE_CUDA
+#include "../cuda4dnn/primitives/mvn.hpp"
+using namespace cv::dnn::cuda4dnn;
 #endif
 
 namespace cv
@@ -116,10 +124,20 @@ public:
 
     virtual bool supportBackend(int backendId) CV_OVERRIDE
     {
-        if (backendId == DNN_BACKEND_INFERENCE_ENGINE)
-            return !zeroDev && (preferableTarget == DNN_TARGET_CPU || eps <= 1e-7f);
-        else
-            return backendId == DNN_BACKEND_OPENCV;
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
+        if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
+        {
+            bool isMyriad = preferableTarget == DNN_TARGET_MYRIAD || preferableTarget == DNN_TARGET_HDDL;
+            return !zeroDev && (!isMyriad || eps <= 1e-7f);
+        }
+#endif
+#ifdef HAVE_DNN_NGRAPH
+        if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+            return true;
+#endif
+        {
+            return backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_CUDA;
+        }
     }
 
 #ifdef HAVE_OPENCL
@@ -132,9 +150,12 @@ public:
         UMat& bnorm_weight = umat_scale;
         UMat& bnorm_bias = umat_shift;
 
+        const unsigned LOCAL_SIZE = 128;
         bool use_half = (inputs[0].depth() == CV_16S);
-        String opts = format(" -DT=%s -DT4=%s -Dconvert_T=%s", use_half ? "half" : "float",
-                             use_half ? "half4" : "float4", use_half ? "convert_half4" : "convert_float4");
+        String opts = format(" -DT=%s -DT4=%s -Dconvert_T=%s -DLOCAL_SIZE=%u", use_half ? "half" : "float",
+                             use_half ? "half4" : "float4", use_half ? "convert_half4" : "convert_float4",
+                             LOCAL_SIZE
+        );
 
         int splitDim = (acrossChannels) ? 1 : 2;
         for (size_t inpIdx = 0; inpIdx < inputs.size(); inpIdx++)
@@ -142,6 +163,7 @@ public:
             UMat &inpMat = inputs[inpIdx];
             UMat &outMat = outputs[inpIdx];
             int newRows = total(shape(inpMat), 0, splitDim);
+            CV_Assert(newRows != 0);
 
             MatShape s = shape(newRows, inpMat.total() / newRows);
             UMat meanMat = UMat(s[0], 1, (use_half) ? CV_16S : CV_32F);
@@ -149,8 +171,8 @@ public:
             float alpha = 1.0f / s[1];
 
             String buildopt = "-DNUM=4" + opts;
-            ocl::Kernel k("mean_fuse4", ocl::dnn::mvn_oclsrc, buildopt);
-            size_t localsize[] = { 128 };
+            ocl::Kernel k("mean_fuse4", ocl::dnn::mvn_oclsrc, buildopt + " -DKERNEL_MEAN_FUSE");
+            size_t localsize[] = { LOCAL_SIZE };
             size_t globalsize[] = { (size_t)s[0] / 4 * localsize[0] };
 
             int argId = 0;
@@ -159,7 +181,6 @@ public:
             k.set(argId++, alpha);
             k.set(argId++, ocl::KernelArg::PtrWriteOnly(meanMat));
             k.set(argId++, ocl::KernelArg::PtrWriteOnly(tmpMat));
-            k.set(argId++, NULL, localsize[0] * sizeof(cl_float4));
             bool ret = k.run(1, globalsize, localsize, false);
             if (!ret)
                 return false;
@@ -167,7 +188,7 @@ public:
             buildopt += format(" %s %s", (fuse_batch_norm) ? "-DFUSE_BATCH_NORM" : "",
                                (fuse_relu) ? "-DFUSE_RELU" : "");
 
-            ocl::Kernel k1("mvn_fuse4", ocl::dnn::mvn_oclsrc, buildopt);
+            ocl::Kernel k1("mvn_fuse4", ocl::dnn::mvn_oclsrc, buildopt + " -DKERNEL_MVN_FUSE");
             argId = 0;
             k1.set(argId++, ocl::KernelArg::PtrReadOnly(tmpMat));
             k1.set(argId++, ocl::KernelArg::PtrReadOnly(inpMat));
@@ -179,7 +200,6 @@ public:
             k1.set(argId++, ocl::KernelArg::PtrReadOnly(bnorm_weight));
             k1.set(argId++, ocl::KernelArg::PtrReadOnly(bnorm_bias));
             k1.set(argId++, ocl::KernelArg::PtrWriteOnly(outMat));
-            k1.set(argId++, NULL, localsize[0] * sizeof(cl_float4));
             ret = k1.run(1, globalsize, localsize, false);
             if (!ret)
                 return false;
@@ -218,6 +238,7 @@ public:
             UMat &inpMat = inputs[inpIdx];
             UMat &outMat = outputs[inpIdx];
             int newRows = total(shape(inpMat), 0, splitDim);
+            CV_Assert(newRows != 0);
 
             MatShape s = shape(newRows, inpMat.total() / newRows);
             UMat oneMat = UMat::ones(s[1], 1, CV_32F);
@@ -237,7 +258,7 @@ public:
             if (normVariance)
             {
                 String kname = format("calc_mean%d", number);
-                ocl::Kernel kernel(kname.c_str(), ocl::dnn::mvn_oclsrc, buildopt);
+                ocl::Kernel kernel(kname.c_str(), ocl::dnn::mvn_oclsrc, buildopt + " -DKERNEL_MEAN");
                 if (kernel.empty())
                     return false;
 
@@ -257,7 +278,7 @@ public:
             }
 
             String kname = format("mvn%d", number);
-            buildopt += format("%s%s%s", (normVariance) ? " -DNORM_VARIANCE" : "",
+            buildopt += format("%s%s%s -DKERNEL_MVN", (normVariance) ? " -DNORM_VARIANCE" : "",
                                (fuse_batch_norm) ? " -DFUSE_BATCH_NORM" : "",
                                (fuse_relu) ? " -DFUSE_RELU" : "");
             ocl::Kernel kernel1(kname.c_str(), ocl::dnn::mvn_oclsrc, buildopt);
@@ -344,7 +365,11 @@ public:
                     bias = i < shift.cols ? ((float*)shift.data)[i] : bias;
                 }
                 cv::meanStdDev(inpRow, mean, (normVariance) ? dev : noArray());
-                double alpha = (normVariance) ? 1/(eps + dev[0]) : 1;
+                double alpha = 1;
+                if (normVariance)
+                {
+                    alpha = 1 / std::sqrt(eps + dev[0]*dev[0]);
+                }
                 double normalizationScale = 1.0;
                 double normalizationShift = 0.0;
                 if (fuse_batch_norm)
@@ -362,21 +387,51 @@ public:
         }
     }
 
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&) CV_OVERRIDE
     {
-#ifdef HAVE_INF_ENGINE
-        InferenceEngine::LayerParams lp;
-        lp.name = name;
-        lp.type = "MVN";
-        lp.precision = InferenceEngine::Precision::FP32;
-        std::shared_ptr<InferenceEngine::MVNLayer> ieLayer(new InferenceEngine::MVNLayer(lp));
-        ieLayer->params["across_channels"] = acrossChannels ? "1" : "0";
-        ieLayer->params["normalize_variance"] = normVariance ? "1" : "0";
-        ieLayer->params["eps"] = format("%f", eps);
+        InferenceEngine::Builder::MVNLayer ieLayer(name);
+        ieLayer.setAcrossChannels(acrossChannels);
+        ieLayer.setNormalize(normVariance);
+        ieLayer.setEpsilon(eps);
         return Ptr<BackendNode>(new InfEngineBackendNode(ieLayer));
-#endif  // HAVE_INF_ENGINE
-        return Ptr<BackendNode>();
     }
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
+
+#ifdef HAVE_DNN_NGRAPH
+    virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inputs,
+                                        const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
+    {
+        auto& ieInpNode = nodes[0].dynamicCast<InfEngineNgraphNode>()->node;
+        auto mvn = std::make_shared<ngraph::op::MVN>(ieInpNode, acrossChannels, normVariance, eps);
+        return Ptr<BackendNode>(new InfEngineNgraphNode(mvn));
+    }
+#endif  // HAVE_DNN_NGRAPH
+
+#ifdef HAVE_CUDA
+    Ptr<BackendNode> initCUDA(
+        void *context_,
+        const std::vector<Ptr<BackendWrapper>>& inputs,
+        const std::vector<Ptr<BackendWrapper>>& outputs
+    ) override
+    {
+        auto context = reinterpret_cast<csl::CSLContext*>(context_);
+
+        cuda4dnn::MVNConfiguration config;
+        config.split_axis = acrossChannels ? 1 : 2;
+        config.normalize_variance = normVariance;
+        config.epsilon = eps;
+        config.input_shapes.resize(inputs.size());
+        for (int i = 0; i < inputs.size(); i++)
+        {
+            auto wrapper = inputs[i].dynamicCast<CUDABackendWrapper>();
+            auto shape = wrapper->getShape();
+            config.input_shapes[i].assign(std::begin(shape), std::end(shape));
+        }
+
+        return make_cuda_node<cuda4dnn::MVNOp>(preferableTarget, std::move(context->stream), config);
+    }
+#endif
 
     virtual int64 getFLOPS(const std::vector<MatShape> &inputs,
                            const std::vector<MatShape> &outputs) const CV_OVERRIDE

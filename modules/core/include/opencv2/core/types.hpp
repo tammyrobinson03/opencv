@@ -1215,7 +1215,7 @@ _Tp Point_<_Tp>::dot(const Point_& pt) const
 template<typename _Tp> inline
 double Point_<_Tp>::ddot(const Point_& pt) const
 {
-    return (double)x*pt.x + (double)y*pt.y;
+    return (double)x*(double)(pt.x) + (double)y*(double)(pt.y);
 }
 
 template<typename _Tp> inline
@@ -1941,8 +1941,11 @@ Rect_<_Tp>& operator += ( Rect_<_Tp>& a, const Size_<_Tp>& b )
 template<typename _Tp> static inline
 Rect_<_Tp>& operator -= ( Rect_<_Tp>& a, const Size_<_Tp>& b )
 {
-    a.width -= b.width;
-    a.height -= b.height;
+    const _Tp width = a.width - b.width;
+    const _Tp height = a.height - b.height;
+    CV_DbgAssert(width >= 0 && height >= 0);
+    a.width = width;
+    a.height = height;
     return a;
 }
 
@@ -2005,6 +2008,15 @@ template<typename _Tp> static inline
 Rect_<_Tp> operator + (const Rect_<_Tp>& a, const Size_<_Tp>& b)
 {
     return Rect_<_Tp>( a.x, a.y, a.width + b.width, a.height + b.height );
+}
+
+template<typename _Tp> static inline
+Rect_<_Tp> operator - (const Rect_<_Tp>& a, const Size_<_Tp>& b)
+{
+    const _Tp width = a.width - b.width;
+    const _Tp height = a.height - b.height;
+    CV_DbgAssert(width >= 0 && height >= 0);
+    return Rect_<_Tp>( a.x, a.y, width, height );
 }
 
 template<typename _Tp> static inline

@@ -44,8 +44,10 @@
 #ifndef OPENCV_CORE_TYPES_H
 #define OPENCV_CORE_TYPES_H
 
-#if !defined(__OPENCV_BUILD) && !defined(CV__DISABLE_C_API_CTORS)
-#define CV__ENABLE_C_API_CTORS // enable C API ctors (must be removed)
+#ifdef CV__ENABLE_C_API_CTORS  // invalid C API ctors (must be removed)
+#if defined(_WIN32) && !defined(CV__SKIP_MESSAGE_MALFORMED_C_API_CTORS)
+#error "C API ctors don't work on Win32: https://github.com/opencv/opencv/issues/15990"
+#endif
 #endif
 
 //#define CV__VALIDATE_UNUNITIALIZED_VARS 1  // C++11 & GCC only
@@ -364,7 +366,7 @@ IplImage;
 
 CV_INLINE IplImage cvIplImage()
 {
-#if !defined(CV__ENABLE_C_API_CTORS)
+#if !(defined(CV__ENABLE_C_API_CTORS) && defined(__cplusplus))
     IplImage self = CV_STRUCT_INITIALIZER; self.nSize = sizeof(IplImage); return self;
 #else
     return _IplImage();
@@ -1957,6 +1959,8 @@ CvSeqReader;
 *             Data structures for persistence (a.k.a serialization) functionality        *
 \****************************************************************************************/
 
+#if 0
+
 /** "black box" file storage */
 typedef struct CvFileStorage CvFileStorage;
 
@@ -2109,28 +2113,7 @@ typedef struct CvTypeInfo
     CvCloneFunc clone; /**< creates a copy of the object */
 }
 CvTypeInfo;
-
-
-/**** System data types ******/
-
-typedef struct CvPluginFuncInfo
-{
-    void** func_addr;
-    void* default_func_addr;
-    const char* func_names;
-    int search_modules;
-    int loaded_from;
-}
-CvPluginFuncInfo;
-
-typedef struct CvModuleInfo
-{
-    struct CvModuleInfo* next;
-    const char* name;
-    const char* version;
-    CvPluginFuncInfo* func_tab;
-}
-CvModuleInfo;
+#endif
 
 /** @} */
 

@@ -5,64 +5,77 @@
 // Copyright (C) 2018 Intel Corporation
 
 
-#include "test_precomp.hpp"
+#include "../test_precomp.hpp"
 #include "../common/gapi_operators_tests.hpp"
-#include "opencv2/gapi/cpu/core.hpp"
 
-#define CORE_FLUID cv::gapi::core::cpu::kernels()
+namespace
+{
+#define CORE_FLUID [] () { return cv::compile_args(cv::gapi::use_only{cv::gapi::core::fluid::kernels()}); }
+}  // anonymous namespace
 
 namespace opencv_test
 {
-    INSTANTIATE_TEST_CASE_P(MathOperatorTestFluid, MathOperatorMatMatTest,
-                            Combine(Values( opPlusM, opMinusM, opDivM,
-                                            opGreater, opLess, opGreaterEq, opLessEq, opEq, opNotEq),
-                                    Values(CV_8UC1, CV_16SC1, CV_32FC1),
-                                    Values(cv::Size(1280, 720),
+
+INSTANTIATE_TEST_CASE_P(MathOperatorTestFluid, MathOperatorMatMatTest,
+                        Combine(Values(CV_8UC1, CV_16SC1, CV_32FC1),
+                                Values(cv::Size(1280, 720),
                                        cv::Size(640, 480),
                                        cv::Size(128, 128)),
-                                    Values(-1, CV_8U, CV_32F),
-    /*init output matrices or not*/ testing::Bool(),
-                                    Values(cv::compile_args(CORE_FLUID))));
+                                Values(-1),
+                                Values(CORE_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values( ADD, SUB, DIV,
+                                        GT, LT, GE, LE, EQ, NE)));
 
-    //FIXME: Some Mat/Scalar Fluid kernels are not there yet!
-    INSTANTIATE_TEST_CASE_P(DISABLED_MathOperatorTestFluid, MathOperatorMatScalarTest,
-                            Combine(Values( opPlus, opPlusR, opMinus, opMinusR, opMul, opMulR, opDiv, opDivR,
-                                            opGT, opLT, opGE, opLE, opEQ, opNE,
-                                            opGTR, opLTR, opGER, opLER, opEQR, opNER),
-                                    Values(CV_8UC1, CV_16SC1, CV_32FC1),
-                                    Values(cv::Size(1280, 720),
-                                           cv::Size(640, 480),
-                                           cv::Size(128, 128)),
-                                    Values(-1, CV_8U, CV_32F),
-    /*init output matrices or not*/ testing::Bool(),
-                                    Values(cv::compile_args(CORE_FLUID))));
-
-    INSTANTIATE_TEST_CASE_P(BitwiseOperatorTestFluid, MathOperatorMatMatTest,
-                            Combine(Values( opAnd, opOr, opXor ),
-                                    Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                    Values(cv::Size(1280, 720),
+INSTANTIATE_TEST_CASE_P(MathOperatorArithmeticTestFluid, MathOperatorMatScalarTest,
+                        Combine(Values(CV_8UC1, CV_16SC1, CV_32FC1),
+                                Values(cv::Size(1280, 720),
                                        cv::Size(640, 480),
                                        cv::Size(128, 128)),
-                                    Values(-1),
-    /*init output matrices or not*/ testing::Bool(),
-                                    Values(cv::compile_args(CORE_FLUID))));
+                                Values(-1),
+                                Values(CORE_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values( ADD,  SUB,  MUL,  DIV,
+                                        ADDR, SUBR, MULR, DIVR)));
 
-    //FIXME: Some Mat/Scalar Fluid kernels are not there yet!
-    INSTANTIATE_TEST_CASE_P(DISABLED_BitwiseOperatorTestFluid, MathOperatorMatScalarTest,
-                            Combine(Values( opAND, opOR, opXOR, opANDR, opORR, opXORR ),
-                                    Values(CV_8UC1, CV_16UC1, CV_16SC1),
-                                    Values(cv::Size(1280, 720),
-                                           cv::Size(640, 480),
-                                           cv::Size(128, 128)),
-                                    Values(-1),
-    /*init output matrices or not*/ testing::Bool(),
-                                    Values(cv::compile_args(CORE_FLUID))));
+  // FIXME: solve comparison error
+INSTANTIATE_TEST_CASE_P(MathOperatorCompareTestFluid, MathOperatorMatScalarTest,
+                        Combine(Values(CV_8UC1, CV_16SC1, CV_32FC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480),
+                                       cv::Size(128, 128)),
+                                Values(-1),
+                                Values(CORE_FLUID),
+                                Values(AbsSimilarPoints(1, 0.01).to_compare_obj()),
+                                Values( GT,  LT,  GE,  LE,  EQ,  NE,
+                                        GTR, LTR, GER, LER, EQR, NER)));
 
-    INSTANTIATE_TEST_CASE_P(BitwiseNotOperatorTestFluid, NotOperatorTest,
+INSTANTIATE_TEST_CASE_P(BitwiseOperatorTestFluid, MathOperatorMatMatTest,
                         Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
                                 Values(cv::Size(1280, 720),
                                        cv::Size(640, 480),
                                        cv::Size(128, 128)),
-    /*init output matrices or not*/ testing::Bool(),
-                                    Values(cv::compile_args(CORE_FLUID))));
+                                Values(-1),
+                                Values(CORE_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values( AND, OR, XOR )));
+
+INSTANTIATE_TEST_CASE_P(BitwiseOperatorTestFluid, MathOperatorMatScalarTest,
+                        Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480),
+                                       cv::Size(128, 128)),
+                                Values(-1),
+                                Values(CORE_FLUID),
+                                Values(AbsExact().to_compare_obj()),
+                                Values( AND,  OR,  XOR,
+                                        ANDR, ORR, XORR )));
+
+INSTANTIATE_TEST_CASE_P(BitwiseNotOperatorTestFluid, NotOperatorTest,
+                    Combine(Values(CV_8UC1, CV_16UC1, CV_16SC1),
+                            Values(cv::Size(1280, 720),
+                                   cv::Size(640, 480),
+                                   cv::Size(128, 128)),
+                            Values(-1),
+                            Values(CORE_FLUID)));
 }
